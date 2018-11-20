@@ -4,87 +4,84 @@ This component provides HA sensor support for Ring Door Bell/Chimes.
 For more details about this platform, please refer to the documentation at
 https://home-assistant.io/components/sensor.ring/
 """
-import logging
 from datetime import timedelta
+import logging
 
 import voluptuous as vol
-import homeassistant.helpers.config_validation as cv
 
+import homeassistant.helpers.config_validation as cv
+from homeassistant.components.ring import (
+    CONF_ATTRIBUTION, DEFAULT_ENTITY_NAMESPACE, DATA_RING)
 from homeassistant.components.sensor import PLATFORM_SCHEMA
 from homeassistant.const import (
-    CONF_ENTITY_NAMESPACE, CONF_MONITORED_CONDITIONS, CONF_SCAN_INTERVAL,
-    CONF_USERNAME, CONF_PASSWORD, STATE_UNKNOWN,
-    ATTR_ATTRIBUTION)
+    CONF_ENTITY_NAMESPACE, CONF_MONITORED_CONDITIONS,
+    STATE_UNKNOWN, ATTR_ATTRIBUTION)
 from homeassistant.helpers.entity import Entity
-import homeassistant.loader as loader
+from homeassistant.helpers.icon import icon_for_battery_level
 
-from requests.exceptions import HTTPError, ConnectTimeout
-
-REQUIREMENTS = ['ring_doorbell==0.1.0']
+DEPENDENCIES = ['ring']
 
 _LOGGER = logging.getLogger(__name__)
 
-NOTIFICATION_ID = 'ring_notification'
-NOTIFICATION_TITLE = 'Ring Sensor Setup'
+SCAN_INTERVAL = timedelta(seconds=30)
 
-DEFAULT_ENTITY_NAMESPACE = 'ring'
-DEFAULT_SCAN_INTERVAL = timedelta(seconds=30)
-
-CONF_ATTRIBUTION = "Data provided by Ring.com"
-
-# Sensor types: Name, category, units, icon
+# Sensor types: Name, category, units, icon, kind
 SENSOR_TYPES = {
-    'battery': ['Battery', ['doorbell'], '%', 'battery-50'],
-    'last_activity': ['Last Activity', ['doorbell'], None, 'history'],
-    'volume': ['Volume', ['chime', 'doorbell'], None, 'bell-ring'],
+    'battery': [
+        'Battery', ['doorbell', 'stickup_cams'], '%', 'battery-50', None],
+
+    'last_activity': [
+        'Last Activity', ['doorbell', 'stickup_cams'], None, 'history', None],
+
+    'last_ding': [
+        'Last Ding', ['doorbell'], None, 'history', 'ding'],
+
+    'last_motion': [
+        'Last Motion', ['doorbell', 'stickup_cams'], None,
+        'history', 'motion'],
+
+    'volume': [
+        'Volume', ['chime', 'doorbell', 'stickup_cams'], None,
+        'bell-ring', None],
+
+    'wifi_signal_category': [
+        'WiFi Signal Category', ['chime', 'doorbell', 'stickup_cams'], None,
+        'wifi', None],
+
+    'wifi_signal_strength': [
+        'WiFi Signal Strength', ['chime', 'doorbell', 'stickup_cams'], 'dBm',
+        'wifi', None],
 }
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
-    vol.Required(CONF_USERNAME): cv.string,
-    vol.Required(CONF_PASSWORD): cv.string,
     vol.Optional(CONF_ENTITY_NAMESPACE, default=DEFAULT_ENTITY_NAMESPACE):
         cv.string,
-    vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL):
-        vol.All(vol.Coerce(int), vol.Range(min=1)),
-    vol.Required(CONF_MONITORED_CONDITIONS, default=[]):
+    vol.Required(CONF_MONITORED_CONDITIONS, default=list(SENSOR_TYPES)):
         vol.All(cv.ensure_list, [vol.In(SENSOR_TYPES)]),
 })
 
 
-def setup_platform(hass, config, add_devices, discovery_info=None):
+def setup_platform(hass, config, add_entities, discovery_info=None):
     """Set up a sensor for a Ring device."""
-    from ring_doorbell import Ring
-
-    ring = Ring(config.get(CONF_USERNAME), config.get(CONF_PASSWORD))
-
-    persistent_notification = loader.get_component('persistent_notification')
-    try:
-        ring.is_connected
-    except (ConnectTimeout, HTTPError) as ex:
-        _LOGGER.error("Unable to connect to Ring service: %s", str(ex))
-        persistent_notification.create(
-            hass, 'Error: {}<br />'
-            'You will need to restart hass after fixing.'
-            ''.format(ex),
-            title=NOTIFICATION_TITLE,
-            notification_id=NOTIFICATION_ID)
-        return False
+    ring = hass.data[DATA_RING]
 
     sensors = []
-    for sensor_type in config.get(CONF_MONITORED_CONDITIONS):
-        for device in ring.chimes:
+    for device in ring.chimes:  # ring.chimes is doing I/O
+        for sensor_type in config[CONF_MONITORED_CONDITIONS]:
             if 'chime' in SENSOR_TYPES[sensor_type][1]:
-                sensors.append(RingSensor(hass,
-                                          device,
-                                          sensor_type))
+                sensors.append(RingSensor(hass, device, sensor_type))
 
-        for device in ring.doorbells:
+    for device in ring.doorbells:  # ring.doorbells is doing I/O
+        for sensor_type in config[CONF_MONITORED_CONDITIONS]:
             if 'doorbell' in SENSOR_TYPES[sensor_type][1]:
-                sensors.append(RingSensor(hass,
-                                          device,
-                                          sensor_type))
+                sensors.append(RingSensor(hass, device, sensor_type))
 
-    add_devices(sensors, True)
+    for device in ring.stickup_cams:  # ring.stickup_cams is doing I/O
+        for sensor_type in config[CONF_MONITORED_CONDITIONS]:
+            if 'stickup_cams' in SENSOR_TYPES[sensor_type][1]:
+                sensors.append(RingSensor(hass, device, sensor_type))
+
+    add_entities(sensors, True)
     return True
 
 
@@ -98,10 +95,12 @@ class RingSensor(Entity):
         self._data = data
         self._extra = None
         self._icon = 'mdi:{}'.format(SENSOR_TYPES.get(self._sensor_type)[3])
-        self._name = "{0} {1}".format(self._data.name,
-                                      SENSOR_TYPES.get(self._sensor_type)[0])
+        self._kind = SENSOR_TYPES.get(self._sensor_type)[4]
+        self._name = "{0} {1}".format(
+            self._data.name, SENSOR_TYPES.get(self._sensor_type)[0])
         self._state = STATE_UNKNOWN
         self._tz = str(hass.config.time_zone)
+        self._unique_id = '{}-{}'.format(self._data.id, self._sensor_type)
 
     @property
     def name(self):
@@ -114,6 +113,11 @@ class RingSensor(Entity):
         return self._state
 
     @property
+    def unique_id(self):
+        """Return a unique ID."""
+        return self._unique_id
+
+    @property
     def device_state_attributes(self):
         """Return the state attributes."""
         attrs = {}
@@ -124,8 +128,9 @@ class RingSensor(Entity):
         attrs['kind'] = self._data.kind
         attrs['timezone'] = self._data.timezone
         attrs['type'] = self._data.family
+        attrs['wifi_name'] = self._data.wifi_name
 
-        if self._extra and self._sensor_type == 'last_activity':
+        if self._extra and self._sensor_type.startswith('last_'):
             attrs['created_at'] = self._extra['created_at']
             attrs['answered'] = self._extra['answered']
             attrs['recording_status'] = self._extra['recording']['status']
@@ -136,6 +141,9 @@ class RingSensor(Entity):
     @property
     def icon(self):
         """Icon to use in the frontend, if any."""
+        if self._sensor_type == 'battery' and self._state is not STATE_UNKNOWN:
+            return icon_for_battery_level(battery_level=int(self._state),
+                                          charging=False)
         return self._icon
 
     @property
@@ -145,6 +153,8 @@ class RingSensor(Entity):
 
     def update(self):
         """Get the latest data and updates the state."""
+        _LOGGER.debug("Pulling data from %s sensor", self._name)
+
         self._data.update()
 
         if self._sensor_type == 'volume':
@@ -153,8 +163,19 @@ class RingSensor(Entity):
         if self._sensor_type == 'battery':
             self._state = self._data.battery_life
 
-        if self._sensor_type == 'last_activity':
-            self._extra = self._data.history(limit=1, timezone=self._tz)[0]
-            created_at = self._extra['created_at']
-            self._state = '{0:0>2}:{1:0>2}'.format(created_at.hour,
-                                                   created_at.minute)
+        if self._sensor_type.startswith('last_'):
+            history = self._data.history(limit=5,
+                                         timezone=self._tz,
+                                         kind=self._kind,
+                                         enforce_limit=True)
+            if history:
+                self._extra = history[0]
+                created_at = self._extra['created_at']
+                self._state = '{0:0>2}:{1:0>2}'.format(
+                    created_at.hour, created_at.minute)
+
+        if self._sensor_type == 'wifi_signal_category':
+            self._state = self._data.wifi_signal_category
+
+        if self._sensor_type == 'wifi_signal_strength':
+            self._state = self._data.wifi_signal_strength

@@ -42,8 +42,8 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 })
 
 
-def setup_platform(hass, config, add_devices, discovery_info=None):
-    """Setup the Neurio sensor."""
+def setup_platform(hass, config, add_entities, discovery_info=None):
+    """Set up the Neurio sensor."""
     api_key = config.get(CONF_API_KEY)
     api_secret = config.get(CONF_API_SECRET)
     sensor_id = config.get(CONF_SENSOR_ID)
@@ -64,12 +64,12 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     update_active()
 
     # Active power sensor
-    add_devices([NeurioEnergy(data, ACTIVE_NAME, ACTIVE_TYPE, update_active)])
+    add_entities([NeurioEnergy(data, ACTIVE_NAME, ACTIVE_TYPE, update_active)])
     # Daily power sensor
-    add_devices([NeurioEnergy(data, DAILY_NAME, DAILY_TYPE, update_daily)])
+    add_entities([NeurioEnergy(data, DAILY_NAME, DAILY_TYPE, update_daily)])
 
 
-class NeurioData(object):
+class NeurioData:
     """Stores data retrieved from Neurio sensor."""
 
     def __init__(self, api_key, api_secret, sensor_id):
@@ -90,7 +90,7 @@ class NeurioData(object):
 
         if not self.sensor_id:
             user_info = self.neurio_client.get_user_information()
-            _LOGGER.warning('Sensor ID auto-detected: %s', user_info[
+            _LOGGER.warning("Sensor ID auto-detected: %s", user_info[
                 "locations"][0]["sensors"][0]["sensorId"])
             self.sensor_id = user_info[
                 "locations"][0]["sensors"][0]["sensorId"]
@@ -111,7 +111,7 @@ class NeurioData(object):
             sample = self.neurio_client.get_samples_live_last(self.sensor_id)
             self._active_power = sample['consumptionPower']
         except (requests.exceptions.RequestException, ValueError, KeyError):
-            _LOGGER.warning('Could not update current power usage.')
+            _LOGGER.warning("Could not update current power usage")
             return None
 
     def get_daily_usage(self):
@@ -127,7 +127,7 @@ class NeurioData(object):
             history = self.neurio_client.get_samples_stats(
                 self.sensor_id, start_time, 'days', end_time)
         except (requests.exceptions.RequestException, ValueError, KeyError):
-            _LOGGER.warning('Could not update daily power usage.')
+            _LOGGER.warning("Could not update daily power usage")
             return None
 
         for result in history:

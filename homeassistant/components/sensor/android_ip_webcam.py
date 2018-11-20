@@ -4,18 +4,18 @@ Support for IP Webcam sensors.
 For more details about this platform, please refer to the documentation at
 https://home-assistant.io/components/sensor.android_ip_webcam/
 """
-import asyncio
 
 from homeassistant.components.android_ip_webcam import (
     KEY_MAP, ICON_MAP, DATA_IP_WEBCAM, AndroidIPCamEntity, CONF_HOST,
     CONF_NAME, CONF_SENSORS)
+from homeassistant.helpers.icon import icon_for_battery_level
 
 DEPENDENCIES = ['android_ip_webcam']
 
 
-@asyncio.coroutine
-def async_setup_platform(hass, config, async_add_devices, discovery_info=None):
-    """Setup the IP Webcam Sensor."""
+async def async_setup_platform(hass, config, async_add_entities,
+                               discovery_info=None):
+    """Set up the IP Webcam Sensor."""
     if discovery_info is None:
         return
 
@@ -29,7 +29,7 @@ def async_setup_platform(hass, config, async_add_devices, discovery_info=None):
     for sensor in sensors:
         all_sensors.append(IPWebcamSensor(name, host, ipcam, sensor))
 
-    async_add_devices(all_sensors, True)
+    async_add_entities(all_sensors, True)
 
 
 class IPWebcamSensor(AndroidIPCamEntity):
@@ -60,8 +60,7 @@ class IPWebcamSensor(AndroidIPCamEntity):
         """Return the state of the sensor."""
         return self._state
 
-    @asyncio.coroutine
-    def async_update(self):
+    async def async_update(self):
         """Retrieve latest state."""
         if self._sensor in ('audio_connections', 'video_connections'):
             if not self._ipcam.status_data:
@@ -75,14 +74,5 @@ class IPWebcamSensor(AndroidIPCamEntity):
     def icon(self):
         """Return the icon for the sensor."""
         if self._sensor == 'battery_level' and self._state is not None:
-            rounded_level = round(int(self._state), -1)
-            returning_icon = 'mdi:battery'
-            if rounded_level < 10:
-                returning_icon = 'mdi:battery-outline'
-            elif self._state == 100:
-                returning_icon = 'mdi:battery'
-            else:
-                returning_icon = 'mdi:battery-{}'.format(str(rounded_level))
-
-            return returning_icon
+            return icon_for_battery_level(int(self._state))
         return ICON_MAP.get(self._sensor, 'mdi:eye')

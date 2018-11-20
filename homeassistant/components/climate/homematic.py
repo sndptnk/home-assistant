@@ -5,22 +5,28 @@ For more details about this platform, please refer to the documentation at
 https://home-assistant.io/components/climate.homematic/
 """
 import logging
-from homeassistant.components.climate import ClimateDevice, STATE_AUTO
-from homeassistant.components.homematic import HMDevice, ATTR_DISCOVER_DEVICES
-from homeassistant.util.temperature import convert
-from homeassistant.const import TEMP_CELSIUS, STATE_UNKNOWN, ATTR_TEMPERATURE
+
+from homeassistant.components.climate import (
+    STATE_AUTO, STATE_MANUAL, SUPPORT_OPERATION_MODE,
+    SUPPORT_TARGET_TEMPERATURE, ClimateDevice)
+from homeassistant.components.homematic import (
+    ATTR_DISCOVER_DEVICES, HM_ATTRIBUTE_SUPPORT, HMDevice)
+from homeassistant.const import ATTR_TEMPERATURE, TEMP_CELSIUS
 
 DEPENDENCIES = ['homematic']
 
 _LOGGER = logging.getLogger(__name__)
 
-STATE_MANUAL = "manual"
-STATE_BOOST = "boost"
+STATE_BOOST = 'boost'
+STATE_COMFORT = 'comfort'
+STATE_LOWERING = 'lowering'
 
 HM_STATE_MAP = {
-    "AUTO_MODE": STATE_AUTO,
-    "MANU_MODE": STATE_MANUAL,
-    "BOOST_MODE": STATE_BOOST,
+    'AUTO_MODE': STATE_AUTO,
+    'MANU_MODE': STATE_MANUAL,
+    'BOOST_MODE': STATE_BOOST,
+    'COMFORT_MODE': STATE_COMFORT,
+    'LOWERING_MODE': STATE_LOWERING
 }
 
 HM_TEMP_MAP = [
@@ -34,24 +40,31 @@ HM_HUMI_MAP = [
 ]
 
 HM_CONTROL_MODE = 'CONTROL_MODE'
+HMIP_CONTROL_MODE = 'SET_POINT_MODE'
+
+SUPPORT_FLAGS = SUPPORT_TARGET_TEMPERATURE | SUPPORT_OPERATION_MODE
 
 
-def setup_platform(hass, config, add_devices, discovery_info=None):
-    """Setup the Homematic thermostat platform."""
+def setup_platform(hass, config, add_entities, discovery_info=None):
+    """Set up the Homematic thermostat platform."""
     if discovery_info is None:
         return
 
     devices = []
-    for config in discovery_info[ATTR_DISCOVER_DEVICES]:
-        new_device = HMThermostat(hass, config)
-        new_device.link_homematic()
+    for conf in discovery_info[ATTR_DISCOVER_DEVICES]:
+        new_device = HMThermostat(conf)
         devices.append(new_device)
 
-    add_devices(devices)
+    add_entities(devices)
 
 
 class HMThermostat(HMDevice, ClimateDevice):
     """Representation of a Homematic thermostat."""
+
+    @property
+    def supported_features(self):
+        """Return the list of supported features."""
+        return SUPPORT_FLAGS
 
     @property
     def temperature_unit(self):
@@ -64,22 +77,34 @@ class HMThermostat(HMDevice, ClimateDevice):
         if HM_CONTROL_MODE not in self._data:
             return None
 
-        # read state and search
-        for mode, state in HM_STATE_MAP.items():
-            code = getattr(self._hmdevice, mode, 0)
-            if self._data.get('CONTROL_MODE') == code:
-                return state
+        # boost mode is active
+        if self._data.get('BOOST_MODE', False):
+            return STATE_BOOST
+
+        # HmIP uses the set_point_mode to say if its
+        # auto or manual
+        if HMIP_CONTROL_MODE in self._data:
+            code = self._data[HMIP_CONTROL_MODE]
+        # Other devices use the control_mode
+        else:
+            code = self._data['CONTROL_MODE']
+
+        # get the name of the mode
+        name = HM_ATTRIBUTE_SUPPORT[HM_CONTROL_MODE][1][code]
+        return name.lower()
 
     @property
     def operation_list(self):
-        """List of available operation modes."""
-        op_list = []
+        """Return the list of available operation modes."""
+        # HMIP use set_point_mode for operation
+        if HMIP_CONTROL_MODE in self._data:
+            return [STATE_MANUAL, STATE_AUTO, STATE_BOOST]
 
-        # generate list
+        # HM
+        op_list = []
         for mode in self._hmdevice.ACTIONNODE:
             if mode in HM_STATE_MAP:
                 op_list.append(HM_STATE_MAP.get(mode))
-
         return op_list
 
     @property
@@ -115,26 +140,26 @@ class HMThermostat(HMDevice, ClimateDevice):
             if state == operation_mode:
                 code = getattr(self._hmdevice, mode, 0)
                 self._hmdevice.MODE = code
+                return
 
     @property
     def min_temp(self):
         """Return the minimum temperature - 4.5 means off."""
-        return convert(4.5, TEMP_CELSIUS, self.unit_of_measurement)
+        return 4.5
 
     @property
     def max_temp(self):
         """Return the maximum temperature - 30.5 means on."""
-        return convert(30.5, TEMP_CELSIUS, self.unit_of_measurement)
+        return 30.5
 
     def _init_data_struct(self):
         """Generate a data dict (self._data) from the Homematic metadata."""
-        # Add state to data dict
         self._state = next(iter(self._hmdevice.WRITENODE.keys()))
-        self._data[self._state] = STATE_UNKNOWN
+        self._data[self._state] = None
 
-        # support state
-        if HM_CONTROL_MODE in self._hmdevice.ATTRIBUTENODE:
-            self._data[HM_CONTROL_MODE] = STATE_UNKNOWN
+        if HM_CONTROL_MODE in self._hmdevice.ATTRIBUTENODE or \
+                HMIP_CONTROL_MODE in self._hmdevice.ATTRIBUTENODE:
+            self._data[HM_CONTROL_MODE] = None
 
         for node in self._hmdevice.SENSORNODE.keys():
-            self._data[node] = STATE_UNKNOWN
+            self._data[node] = None

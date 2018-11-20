@@ -12,7 +12,6 @@ import voluptuous as vol
 from homeassistant.const import CONF_VERIFY_SSL
 from homeassistant.components.netatmo import CameraData
 from homeassistant.components.camera import (Camera, PLATFORM_SCHEMA)
-from homeassistant.loader import get_component
 from homeassistant.helpers import config_validation as cv
 
 DEPENDENCIES = ['netatmo']
@@ -30,13 +29,12 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 })
 
 
-# pylint: disable=unused-argument
-def setup_platform(hass, config, add_devices, discovery_info=None):
-    """Setup access to Netatmo cameras."""
-    netatmo = get_component('netatmo')
+def setup_platform(hass, config, add_entities, discovery_info=None):
+    """Set up access to Netatmo cameras."""
+    netatmo = hass.components.netatmo
     home = config.get(CONF_HOME)
     verify_ssl = config.get(CONF_VERIFY_SSL, True)
-    import lnetatmo
+    import pyatmo
     try:
         data = CameraData(netatmo.NETATMO_AUTH, home)
         for camera_name in data.get_camera_names():
@@ -45,9 +43,9 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
                 if config[CONF_CAMERAS] != [] and \
                    camera_name not in config[CONF_CAMERAS]:
                     continue
-            add_devices([NetatmoCamera(data, camera_name, home,
-                                       camera_type, verify_ssl)])
-    except lnetatmo.NoDevice:
+            add_entities([NetatmoCamera(data, camera_name, home,
+                                        camera_type, verify_ssl)])
+    except pyatmo.NoDevice:
         return None
 
 
@@ -55,7 +53,7 @@ class NetatmoCamera(Camera):
     """Representation of the images published from a Netatmo camera."""
 
     def __init__(self, data, camera_name, home, camera_type, verify_ssl):
-        """Setup for access to the Netatmo camera images."""
+        """Set up for access to the Netatmo camera images."""
         super(NetatmoCamera, self).__init__()
         self._data = data
         self._camera_name = camera_name
@@ -64,10 +62,6 @@ class NetatmoCamera(Camera):
             self._name = home + ' / ' + camera_name
         else:
             self._name = camera_name
-        camera_id = data.camera_data.cameraByName(camera=camera_name,
-                                                  home=home)['id']
-        self._unique_id = "Welcome_camera {0} - {1}".format(self._name,
-                                                            camera_id)
         self._vpnurl, self._localurl = self._data.camera_data.cameraUrls(
             camera=camera_name
             )
@@ -83,13 +77,13 @@ class NetatmoCamera(Camera):
                 response = requests.get('{0}/live/snapshot_720.jpg'.format(
                     self._vpnurl), timeout=10, verify=self._verify_ssl)
             else:
-                _LOGGER.error('Welcome VPN url is None')
+                _LOGGER.error("Welcome VPN URL is None")
                 self._data.update()
                 (self._vpnurl, self._localurl) = \
                     self._data.camera_data.cameraUrls(camera=self._camera_name)
                 return None
         except requests.exceptions.RequestException as error:
-            _LOGGER.error('Welcome url changed: %s', error)
+            _LOGGER.error("Welcome URL changed: %s", error)
             self._data.update()
             (self._vpnurl, self._localurl) = \
                 self._data.camera_data.cameraUrls(camera=self._camera_name)
@@ -103,20 +97,14 @@ class NetatmoCamera(Camera):
 
     @property
     def brand(self):
-        """Camera brand."""
+        """Return the camera brand."""
         return "Netatmo"
 
     @property
     def model(self):
-        """Camera model."""
+        """Return the camera model."""
         if self._cameratype == "NOC":
             return "Presence"
-        elif self._cameratype == "NACamera":
+        if self._cameratype == "NACamera":
             return "Welcome"
-        else:
-            return None
-
-    @property
-    def unique_id(self):
-        """Return the unique ID for this sensor."""
-        return self._unique_id
+        return None

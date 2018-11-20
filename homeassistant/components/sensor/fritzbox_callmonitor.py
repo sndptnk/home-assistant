@@ -21,22 +21,24 @@ from homeassistant.helpers.entity import Entity
 import homeassistant.helpers.config_validation as cv
 from homeassistant.util import Throttle
 
-REQUIREMENTS = ['fritzconnection==0.6.3']
+REQUIREMENTS = ['fritzconnection==0.6.5']
 
 _LOGGER = logging.getLogger(__name__)
-DEFAULT_NAME = 'Phone'
-DEFAULT_HOST = '169.254.1.1'  # IP valid for all Fritz!Box routers
-DEFAULT_PORT = 1012
 
-VALUE_DEFAULT = 'idle'
-VALUE_RING = 'ringing'
-VALUE_CALL = 'dialing'
-VALUE_CONNECT = 'talking'
-VALUE_DISCONNECT = 'idle'
 CONF_PHONEBOOK = 'phonebook'
 CONF_PREFIXES = 'prefixes'
 
+DEFAULT_HOST = '169.254.1.1'  # IP valid for all Fritz!Box routers
+DEFAULT_NAME = 'Phone'
+DEFAULT_PORT = 1012
+
 INTERVAL_RECONNECT = 60
+
+VALUE_CALL = 'dialing'
+VALUE_CONNECT = 'talking'
+VALUE_DEFAULT = 'idle'
+VALUE_DISCONNECT = 'idle'
+VALUE_RING = 'ringing'
 
 # Return cached results if phonebook was downloaded less then this time ago.
 MIN_TIME_PHONEBOOK_UPDATE = datetime.timedelta(hours=6)
@@ -49,35 +51,33 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_PASSWORD, default='admin'): cv.string,
     vol.Optional(CONF_USERNAME, default=''): cv.string,
     vol.Optional(CONF_PHONEBOOK, default=0): cv.positive_int,
-    vol.Optional(CONF_PREFIXES, default=[]): vol.All(cv.ensure_list,
-                                                     [cv.string])
+    vol.Optional(CONF_PREFIXES, default=[]):
+        vol.All(cv.ensure_list, [cv.string])
 })
 
 
-def setup_platform(hass, config, add_devices, discovery_info=None):
-    """Setup Fritz!Box call monitor sensor platform."""
+def setup_platform(hass, config, add_entities, discovery_info=None):
+    """Set up Fritz!Box call monitor sensor platform."""
     name = config.get(CONF_NAME)
     host = config.get(CONF_HOST)
     port = config.get(CONF_PORT)
     username = config.get(CONF_USERNAME)
     password = config.get(CONF_PASSWORD)
-    phonebook_id = config.get('phonebook')
-    prefixes = config.get('prefixes')
+    phonebook_id = config.get(CONF_PHONEBOOK)
+    prefixes = config.get(CONF_PREFIXES)
 
     try:
-        phonebook = FritzBoxPhonebook(host=host, port=port,
-                                      username=username, password=password,
-                                      phonebook_id=phonebook_id,
-                                      prefixes=prefixes)
-    # pylint: disable=bare-except
-    except:
+        phonebook = FritzBoxPhonebook(
+            host=host, port=port, username=username, password=password,
+            phonebook_id=phonebook_id, prefixes=prefixes)
+    except:  # noqa: E722 pylint: disable=bare-except
         phonebook = None
-        _LOGGER.warning('Phonebook with ID %s not found on Fritz!Box',
+        _LOGGER.warning("Phonebook with ID %s not found on Fritz!Box",
                         phonebook_id)
 
     sensor = FritzBoxCallSensor(name=name, phonebook=phonebook)
 
-    add_devices([sensor])
+    add_entities([sensor])
 
     monitor = FritzBoxCallMonitor(host=host, port=port, sensor=sensor)
     monitor.connect()
@@ -90,10 +90,7 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
         _stop_listener
     )
 
-    if monitor.sock is None:
-        return False
-    else:
-        return True
+    return monitor.sock is not None
 
 
 class FritzBoxCallSensor(Entity):
@@ -116,11 +113,8 @@ class FritzBoxCallSensor(Entity):
 
     @property
     def should_poll(self):
-        """Polling needed only to update phonebook, if defined."""
-        if self.phonebook is None:
-            return False
-        else:
-            return True
+        """Only poll to update phonebook, if defined."""
+        return self.phonebook is not None
 
     @property
     def state(self):
@@ -141,8 +135,7 @@ class FritzBoxCallSensor(Entity):
         """Return a name for a given phone number."""
         if self.phonebook is None:
             return 'unknown'
-        else:
-            return self.phonebook.get_name(number)
+        return self.phonebook.get_name(number)
 
     def update(self):
         """Update the phonebook if it is defined."""
@@ -150,7 +143,7 @@ class FritzBoxCallSensor(Entity):
             self.phonebook.update_phonebook()
 
 
-class FritzBoxCallMonitor(object):
+class FritzBoxCallMonitor:
     """Event listener to monitor calls on the Fritz!Box."""
 
     def __init__(self, host, port, sensor):
@@ -163,8 +156,10 @@ class FritzBoxCallMonitor(object):
 
     def connect(self):
         """Connect to the Fritz!Box."""
+        _LOGGER.debug('Setting up socket...')
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.settimeout(10)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         try:
             self.sock.connect((self.host, self.port))
             threading.Thread(target=self._listen).start()
@@ -175,6 +170,7 @@ class FritzBoxCallMonitor(object):
 
     def _listen(self):
         """Listen to incoming or outgoing calls."""
+        _LOGGER.debug('Connection established, waiting for response...')
         while not self.stopped.isSet():
             try:
                 response = self.sock.recv(2048)
@@ -182,10 +178,12 @@ class FritzBoxCallMonitor(object):
                 # if no response after 10 seconds, just recv again
                 continue
             response = str(response, "utf-8")
+            _LOGGER.debug('Received %s', response)
 
             if not response:
                 # if the response is empty, the connection has been lost.
                 # try to reconnect
+                _LOGGER.warning('Connection lost, reconnecting...')
                 self.sock = None
                 while self.sock is None:
                     self.connect()
@@ -194,7 +192,6 @@ class FritzBoxCallMonitor(object):
                 line = response.split("\n", 1)[0]
                 self._parse(line)
                 time.sleep(1)
-        return
 
     def _parse(self, line):
         """Parse the call information and set the sensor states."""
@@ -222,7 +219,7 @@ class FritzBoxCallMonitor(object):
             self._sensor.set_attributes(att)
         elif line[1] == "CONNECT":
             self._sensor.set_state(VALUE_CONNECT)
-            att = {"with": line[4], "device": [3], "accepted": isotime}
+            att = {"with": line[4], "device": line[3], "accepted": isotime}
             att["with_name"] = self._sensor.number_to_name(att["with"])
             self._sensor.set_attributes(att)
         elif line[1] == "DISCONNECT":
@@ -232,7 +229,7 @@ class FritzBoxCallMonitor(object):
         self._sensor.schedule_update_ha_state()
 
 
-class FritzBoxPhonebook(object):
+class FritzBoxPhonebook:
     """This connects to a FritzBox router and downloads its phone book."""
 
     def __init__(self, host, port, username, password,
@@ -247,12 +244,10 @@ class FritzBoxPhonebook(object):
         self.number_dict = None
         self.prefixes = prefixes or []
 
-        # pylint: disable=import-error
-        import fritzconnection as fc
+        import fritzconnection as fc  # pylint: disable=import-error
         # Establish a connection to the FRITZ!Box.
-        self.fph = fc.FritzPhonebook(address=self.host,
-                                     user=self.username,
-                                     password=self.password)
+        self.fph = fc.FritzPhonebook(
+            address=self.host, user=self.username, password=self.password)
 
         if self.phonebook_id not in self.fph.list_phonebooks:
             raise ValueError("Phonebook with this ID not found.")
@@ -266,7 +261,7 @@ class FritzBoxPhonebook(object):
         self.number_dict = {re.sub(r'[^\d\+]', '', nr): name
                             for name, nrs in self.phonebook_dict.items()
                             for nr in nrs}
-        _LOGGER.info('Fritz!Box phone book successfully updated.')
+        _LOGGER.info("Fritz!Box phone book successfully updated")
 
     def get_name(self, number):
         """Return a name for a given phone number."""

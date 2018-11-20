@@ -4,75 +4,59 @@ Support for ZoneMinder camera streaming.
 For more details about this platform, please refer to the documentation at
 https://home-assistant.io/components/camera.zoneminder/
 """
-import asyncio
 import logging
-from urllib.parse import urljoin, urlencode
 
 from homeassistant.const import CONF_NAME
 from homeassistant.components.camera.mjpeg import (
     CONF_MJPEG_URL, CONF_STILL_IMAGE_URL, MjpegCamera)
-
-import homeassistant.components.zoneminder as zoneminder
+from homeassistant.components.zoneminder import DOMAIN as ZONEMINDER_DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
 DEPENDENCIES = ['zoneminder']
-DOMAIN = 'zoneminder'
 
 
-def _get_image_url(hass, monitor, mode):
-    zm_data = hass.data[DOMAIN]
-    query = urlencode({
-        'mode': mode,
-        'buffer': monitor['StreamReplayBuffer'],
-        'monitor': monitor['Id'],
-    })
-    url = '{zms_url}?{query}'.format(
-        zms_url=urljoin(zm_data['server_origin'], zm_data['path_zms']),
-        query=query,
-    )
-    _LOGGER.debug('Monitor %s %s URL (without auth): %s',
-                  monitor['Id'], mode, url)
+def setup_platform(hass, config, add_entities, discovery_info=None):
+    """Set up the ZoneMinder cameras."""
+    zm_client = hass.data[ZONEMINDER_DOMAIN]
 
-    if not zm_data['username']:
-        return url
-
-    url += '&user={:s}'.format(zm_data['username'])
-
-    if not zm_data['password']:
-        return url
-
-    return url + '&pass={:s}'.format(zm_data['password'])
-
-
-@asyncio.coroutine
-# pylint: disable=unused-argument
-def async_setup_platform(hass, config, async_add_devices, discovery_info=None):
-    """Setup ZoneMinder cameras."""
-    cameras = []
-    monitors = zoneminder.get_state('api/monitors.json')
+    monitors = zm_client.get_monitors()
     if not monitors:
-        _LOGGER.warning('Could not fetch monitors from ZoneMinder')
+        _LOGGER.warning("Could not fetch monitors from ZoneMinder")
         return
 
-    for i in monitors['monitors']:
-        monitor = i['Monitor']
+    cameras = []
+    for monitor in monitors:
+        _LOGGER.info("Initializing camera %s", monitor.id)
+        cameras.append(ZoneMinderCamera(monitor))
+    add_entities(cameras)
 
-        if monitor['Function'] == 'None':
-            _LOGGER.info('Skipping camera %s', monitor['Id'])
-            continue
 
-        _LOGGER.info('Initializing camera %s', monitor['Id'])
+class ZoneMinderCamera(MjpegCamera):
+    """Representation of a ZoneMinder Monitor Stream."""
 
+    def __init__(self, monitor):
+        """Initialize as a subclass of MjpegCamera."""
         device_info = {
-            CONF_NAME: monitor['Name'],
-            CONF_MJPEG_URL: _get_image_url(hass, monitor, 'jpeg'),
-            CONF_STILL_IMAGE_URL: _get_image_url(hass, monitor, 'single')
+            CONF_NAME: monitor.name,
+            CONF_MJPEG_URL: monitor.mjpeg_image_url,
+            CONF_STILL_IMAGE_URL: monitor.still_image_url
         }
-        cameras.append(MjpegCamera(hass, device_info))
+        super().__init__(device_info)
+        self._is_recording = None
+        self._monitor = monitor
 
-    if not cameras:
-        _LOGGER.warning('No active cameras found')
-        return
+    @property
+    def should_poll(self):
+        """Update the recording state periodically."""
+        return True
 
-    async_add_devices(cameras)
+    def update(self):
+        """Update our recording state from the ZM API."""
+        _LOGGER.debug("Updating camera state for monitor %i", self._monitor.id)
+        self._is_recording = self._monitor.is_recording
+
+    @property
+    def is_recording(self):
+        """Return whether the monitor is in alarm mode."""
+        return self._is_recording

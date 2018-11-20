@@ -1,5 +1,5 @@
 """
-Sets up a demo environment that mimics interaction with devices.
+Set up the demo environment that mimics interaction with devices.
 
 For more details about this component, please refer to the documentation
 https://home-assistant.io/components/demo/
@@ -7,9 +7,8 @@ https://home-assistant.io/components/demo/
 import asyncio
 import time
 
-import homeassistant.bootstrap as bootstrap
+from homeassistant import bootstrap
 import homeassistant.core as ha
-import homeassistant.loader as loader
 from homeassistant.const import ATTR_ENTITY_ID, CONF_PLATFORM
 
 DEPENDENCIES = ['conversation', 'introduction', 'zone']
@@ -32,15 +31,15 @@ COMPONENTS_WITH_DEMO_PLATFORM = [
     'sensor',
     'switch',
     'tts',
+    'mailbox',
 ]
 
 
-@asyncio.coroutine
-def async_setup(hass, config):
-    """Setup a demo environment."""
-    group = loader.get_component('group')
-    configurator = loader.get_component('configurator')
-    persistent_notification = loader.get_component('persistent_notification')
+async def async_setup(hass, config):
+    """Set up the demo environment."""
+    group = hass.components.group
+    configurator = hass.components.configurator
+    persistent_notification = hass.components.persistent_notification
 
     config.setdefault(ha.DOMAIN, {})
     config.setdefault(DOMAIN, {})
@@ -59,7 +58,7 @@ def async_setup(hass, config):
         bootstrap.async_setup_component(hass, 'sun')
     ]
 
-    # Setup demo platforms
+    # Set up demo platforms
     demo_config = config.copy()
     for component in COMPONENTS_WITH_DEMO_PLATFORM:
         demo_config[component] = {CONF_PLATFORM: 'demo'}
@@ -87,8 +86,8 @@ def async_setup(hass, config):
 
     # Set up input boolean
     tasks.append(bootstrap.async_setup_component(
-        hass, 'input_slider',
-        {'input_slider': {
+        hass, 'input_number',
+        {'input_number': {
             'noise_allowance': {'icon': 'mdi:bell-ring',
                                 'min': 0,
                                 'max': 10,
@@ -101,24 +100,35 @@ def async_setup(hass, config):
         {'weblink': {'entities': [{'name': 'Router',
                                    'url': 'http://192.168.1.1'}]}}))
 
-    results = yield from asyncio.gather(*tasks, loop=hass.loop)
+    results = await asyncio.gather(*tasks, loop=hass.loop)
 
     if any(not result for result in results):
         return False
 
-    # Setup example persistent notification
+    # Set up example persistent notification
     persistent_notification.async_create(
-        hass, 'This is an example of a persistent notification.',
+        'This is an example of a persistent notification.',
         title='Example Notification')
 
-    # Setup room groups
+    # Set up room groups
     lights = sorted(hass.states.async_entity_ids('light'))
     switches = sorted(hass.states.async_entity_ids('switch'))
     media_players = sorted(hass.states.async_entity_ids('media_player'))
 
     tasks2 = []
 
-    # Setup scripts
+    # Set up history graph
+    tasks2.append(bootstrap.async_setup_component(
+        hass, 'history_graph',
+        {'history_graph': {'switches': {
+            'name': 'Recent Switches',
+            'entities': switches,
+            'hours_to_show': 1,
+            'refresh': 60
+        }}}
+    ))
+
+    # Set up scripts
     tasks2.append(bootstrap.async_setup_component(
         hass, 'script',
         {'script': {
@@ -140,7 +150,7 @@ def async_setup(hass, config):
                 }]
             }}}))
 
-    # Setup scenes
+    # Set up scenes
     tasks2.append(bootstrap.async_setup_component(
         hass, 'scene',
         {'scene': [
@@ -157,36 +167,36 @@ def async_setup(hass, config):
              }},
             ]}))
 
-    tasks2.append(group.Group.async_create_group(hass, 'living room', [
+    tasks2.append(group.Group.async_create_group(hass, 'Living Room', [
         lights[1], switches[0], 'input_select.living_room_preset',
-        'rollershutter.living_room_window', media_players[1],
+        'cover.living_room_window', media_players[1],
         'scene.romantic_lights']))
-    tasks2.append(group.Group.async_create_group(hass, 'bedroom', [
+    tasks2.append(group.Group.async_create_group(hass, 'Bedroom', [
         lights[0], switches[1], media_players[0],
-        'input_slider.noise_allowance']))
-    tasks2.append(group.Group.async_create_group(hass, 'kitchen', [
-        lights[2], 'rollershutter.kitchen_window', 'lock.kitchen_door']))
-    tasks2.append(group.Group.async_create_group(hass, 'doors', [
+        'input_number.noise_allowance']))
+    tasks2.append(group.Group.async_create_group(hass, 'Kitchen', [
+        lights[2], 'cover.kitchen_window', 'lock.kitchen_door']))
+    tasks2.append(group.Group.async_create_group(hass, 'Doors', [
         'lock.front_door', 'lock.kitchen_door',
         'garage_door.right_garage_door', 'garage_door.left_garage_door']))
-    tasks2.append(group.Group.async_create_group(hass, 'automations', [
+    tasks2.append(group.Group.async_create_group(hass, 'Automations', [
         'input_select.who_cooks', 'input_boolean.notify', ]))
-    tasks2.append(group.Group.async_create_group(hass, 'people', [
+    tasks2.append(group.Group.async_create_group(hass, 'People', [
         'device_tracker.demo_anne_therese', 'device_tracker.demo_home_boy',
         'device_tracker.demo_paulus']))
-    tasks2.append(group.Group.async_create_group(hass, 'downstairs', [
+    tasks2.append(group.Group.async_create_group(hass, 'Downstairs', [
         'group.living_room', 'group.kitchen',
-        'scene.romantic_lights', 'rollershutter.kitchen_window',
-        'rollershutter.living_room_window', 'group.doors',
-        'thermostat.ecobee',
+        'scene.romantic_lights', 'cover.kitchen_window',
+        'cover.living_room_window', 'group.doors',
+        'climate.ecobee',
     ], view=True))
 
-    results = yield from asyncio.gather(*tasks2, loop=hass.loop)
+    results = await asyncio.gather(*tasks2, loop=hass.loop)
 
     if any(not result for result in results):
         return False
 
-    # Setup configurator
+    # Set up configurator
     configurator_ids = []
 
     def hue_configuration_callback(data):
@@ -204,12 +214,13 @@ def async_setup(hass, config):
             configurator.request_done(configurator_ids[0])
 
     def setup_configurator():
-        """Setup configurator."""
+        """Set up a configurator."""
         request_id = configurator.request_config(
-            hass, "Philips Hue", hue_configuration_callback,
+            "Philips Hue", hue_configuration_callback,
             description=("Press the button on the bridge to register Philips "
                          "Hue with Home Assistant."),
             description_image="/static/images/config_philips_hue.jpg",
+            fields=[{'id': 'username', 'name': 'Username'}],
             submit_caption="I have pressed the button"
         )
         configurator_ids.append(request_id)

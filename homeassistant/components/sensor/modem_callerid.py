@@ -14,13 +14,11 @@ from homeassistant.components.sensor import PLATFORM_SCHEMA
 from homeassistant.helpers.entity import Entity
 import homeassistant.helpers.config_validation as cv
 
-REQUIREMENTS = ['https://github.com/vroomfonde1/basicmodem'
-                '/archive/0.7.zip'
-                '#basicmodem==0.7']
+REQUIREMENTS = ['basicmodem==0.7']
 
 _LOGGER = logging.getLogger(__name__)
 DEFAULT_NAME = 'Modem CallerID'
-ICON = 'mdi:phone-clasic'
+ICON = 'mdi:phone-classic'
 DEFAULT_DEVICE = '/dev/ttyACM0'
 
 STATE_RING = 'ring'
@@ -32,8 +30,8 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 })
 
 
-def setup_platform(hass, config, add_devices, discovery_info=None):
-    """Setup modem caller id sensor platform."""
+def setup_platform(hass, config, add_entities, discovery_info=None):
+    """Set up modem caller ID sensor platform."""
     from basicmodem.basicmodem import BasicModem as bm
     name = config.get(CONF_NAME)
     port = config.get(CONF_DEVICE)
@@ -43,11 +41,11 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
         _LOGGER.error('Unable to initialize modem.')
         return
 
-    add_devices([ModemCalleridSensor(hass, name, port, modem)])
+    add_entities([ModemCalleridSensor(hass, name, port, modem)])
 
 
 class ModemCalleridSensor(Entity):
-    """Implementation of USB modem callerid sensor."""
+    """Implementation of USB modem caller ID sensor."""
 
     def __init__(self, hass, name, port, modem):
         """Initialize the sensor."""
@@ -97,10 +95,9 @@ class ModemCalleridSensor(Entity):
         if self.modem:
             self.modem.close()
             self.modem = None
-        return
 
     def _incomingcallcallback(self, newstate):
-        """Callback from modem, process based on new state."""
+        """Handle new states."""
         if newstate == self.modem.STATE_RING:
             if self.state == self.modem.STATE_IDLE:
                 att = {"cid_time": self.modem.get_cidtime,
@@ -119,4 +116,3 @@ class ModemCalleridSensor(Entity):
         elif newstate == self.modem.STATE_IDLE:
             self._state = STATE_IDLE
             self.schedule_update_ha_state()
-        return

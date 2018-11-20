@@ -1,5 +1,5 @@
 """
-Support for Volvo locks.
+Support for Volvo On Call locks.
 
 For more details about this platform, please refer to the documentation at
 https://home-assistant.io/components/lock.volvooncall/
@@ -12,12 +12,12 @@ from homeassistant.components.volvooncall import VolvoEntity
 _LOGGER = logging.getLogger(__name__)
 
 
-# pylint: disable=unused-argument
-def setup_platform(hass, config, add_devices, discovery_info=None):
-    """Setup the lock."""
+def setup_platform(hass, config, add_entities, discovery_info=None):
+    """Set up the Volvo On Call lock."""
     if discovery_info is None:
         return
-    add_devices([VolvoLock(hass, *discovery_info)])
+
+    add_entities([VolvoLock(hass, *discovery_info)])
 
 
 class VolvoLock(VolvoEntity, LockDevice):

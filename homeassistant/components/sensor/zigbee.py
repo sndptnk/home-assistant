@@ -30,8 +30,8 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 })
 
 
-def setup_platform(hass, config, add_devices, discovery_info=None):
-    """Setup the ZigBee platform.
+def setup_platform(hass, config, add_entities, discovery_info=None):
+    """Set up the ZigBee platform.
 
     Uses the 'type' config value to work out which type of ZigBee sensor we're
     dealing with and instantiates the relevant classes to handle it.
@@ -44,7 +44,7 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
         _LOGGER.exception("Unknown ZigBee sensor type: %s", typ)
         return
 
-    add_devices([sensor_class(hass, config_class(config))], True)
+    add_entities([sensor_class(hass, config_class(config))], True)
 
 
 class ZigBeeTemperatureSensor(Entity):
@@ -67,10 +67,10 @@ class ZigBeeTemperatureSensor(Entity):
 
     @property
     def unit_of_measurement(self):
-        """Unit the value is expressed in."""
+        """Return the unit of measurement the value is expressed in."""
         return TEMP_CELSIUS
 
-    def update(self, *args):
+    def update(self):
         """Get the latest data."""
         try:
             self._temp = zigbee.DEVICE.get_temperature(self._config.address)

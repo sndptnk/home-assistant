@@ -4,11 +4,10 @@ Support for collecting data from the ARWN project.
 For more details about this platform, please refer to the documentation at
 https://home-assistant.io/components/sensor.arwn/
 """
-import asyncio
 import json
 import logging
 
-import homeassistant.components.mqtt as mqtt
+from homeassistant.components import mqtt
 from homeassistant.core import callback
 from homeassistant.const import TEMP_FAHRENHEIT, TEMP_CELSIUS
 from homeassistant.helpers.entity import Entity
@@ -38,6 +37,13 @@ def discover_sensors(topic, payload):
         else:
             unit = TEMP_CELSIUS
         return ArwnSensor(name, 'temp', unit)
+    if domain == "moisture":
+        name = parts[2] + " Moisture"
+        return ArwnSensor(name, 'moisture', unit, "mdi:water-percent")
+    if domain == "rain":
+        if len(parts) >= 3 and parts[2] == "today":
+            return ArwnSensor("Rain Since Midnight", 'since_midnight',
+                              "in", "mdi:water")
     if domain == 'barometer':
         return ArwnSensor('Barometer', 'pressure', unit,
                           "mdi:thermometer-lines")
@@ -51,8 +57,8 @@ def _slug(name):
     return 'sensor.arwn_{}'.format(slugify(name))
 
 
-@asyncio.coroutine
-def async_setup_platform(hass, config, async_add_devices, discovery_info=None):
+async def async_setup_platform(hass, config, async_add_entities,
+                               discovery_info=None):
     """Set up the ARWN platform."""
     @callback
     def async_sensor_event_received(topic, payload, qos):
@@ -90,11 +96,11 @@ def async_setup_platform(hass, config, async_add_devices, discovery_info=None):
                 store[sensor.name] = sensor
                 _LOGGER.debug("Registering new sensor %(name)s => %(event)s",
                               dict(name=sensor.name, event=event))
-                async_add_devices((sensor,), True)
+                async_add_entities((sensor,), True)
             else:
                 store[sensor.name].set_event(event)
 
-    yield from mqtt.async_subscribe(
+    await mqtt.async_subscribe(
         hass, TOPIC, async_sensor_event_received, 0)
     return True
 
@@ -116,6 +122,7 @@ class ArwnSensor(Entity):
         """Update the sensor with the most recent event."""
         self.event = {}
         self.event.update(event)
+        self.async_schedule_update_ha_state()
 
     @property
     def state(self):
@@ -134,18 +141,15 @@ class ArwnSensor(Entity):
 
     @property
     def unit_of_measurement(self):
-        """Unit this state is expressed in."""
+        """Return the unit of measurement the state is expressed in."""
         return self._unit_of_measurement
 
     @property
     def should_poll(self):
-        """Should we poll."""
+        """Return the polling state."""
         return False
 
     @property
     def icon(self):
-        """Icon of device based on its type."""
-        if self._icon:
-            return self._icon
-        else:
-            return super().icon
+        """Return the icon of device based on its type."""
+        return self._icon

@@ -56,7 +56,7 @@ def test_default_setup(hass, mock_connection_factory):
 
     telegram = {
         CURRENT_ELECTRICITY_USAGE: CosemObject([
-            {'value': Decimal('0.1'), 'unit': 'kWh'}
+            {'value': Decimal('0.0'), 'unit': 'kWh'}
         ]),
         ELECTRICITY_ACTIVE_TARIFF: CosemObject([
             {'value': '0001', 'unit': ''}
@@ -82,13 +82,13 @@ def test_default_setup(hass, mock_connection_factory):
 
     # ensure entities have new state value after incoming telegram
     power_consumption = hass.states.get('sensor.power_consumption')
-    assert power_consumption.state == '0.1'
+    assert power_consumption.state == '0.0'
     assert power_consumption.attributes.get('unit_of_measurement') is 'kWh'
 
     # tariff should be translated in human readable and have no unit
     power_tariff = hass.states.get('sensor.power_tariff')
     assert power_tariff.state == 'low'
-    assert power_tariff.attributes.get('unit_of_measurement') is None
+    assert power_tariff.attributes.get('unit_of_measurement') == ''
 
 
 @asyncio.coroutine
@@ -110,7 +110,7 @@ def test_derivative():
     yield from entity.async_update()
 
     assert entity.state == STATE_UNKNOWN, \
-        'state after first update shoudl still be unknown'
+        'state after first update should still be unknown'
 
     entity.telegram = {
         '1.0.0': MBusObject([
@@ -182,10 +182,14 @@ def test_reconnect(hass, monkeypatch, mock_connection_factory):
 
     # mock waiting coroutine while connection lasts
     closed = asyncio.Event(loop=hass.loop)
+    # Handshake so that `hass.async_block_till_done()` doesn't cycle forever
+    closed2 = asyncio.Event(loop=hass.loop)
 
     @asyncio.coroutine
     def wait_closed():
         yield from closed.wait()
+        closed2.set()
+        closed.clear()
     protocol.wait_closed = wait_closed
 
     yield from async_setup_component(hass, 'sensor', {'sensor': config})
@@ -195,9 +199,12 @@ def test_reconnect(hass, monkeypatch, mock_connection_factory):
     # indicate disconnect, release wait lock and allow reconnect to happen
     closed.set()
     # wait for lock set to resolve
-    yield from hass.async_block_till_done()
-    # wait for sleep to resolve
+    yield from closed2.wait()
+    closed2.clear()
+    assert not closed.is_set()
+
+    closed.set()
     yield from hass.async_block_till_done()
 
-    assert connection_factory.call_count == 2, \
+    assert connection_factory.call_count >= 2, \
         'connecting not retried'

@@ -8,7 +8,7 @@ import logging
 
 import voluptuous as vol
 
-import homeassistant.components.bbb_gpio as bbb_gpio
+from homeassistant.components import bbb_gpio
 from homeassistant.components.binary_sensor import (
     BinarySensorDevice, PLATFORM_SCHEMA)
 from homeassistant.const import (DEVICE_DEFAULT_NAME, CONF_NAME)
@@ -41,19 +41,19 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 })
 
 
-def setup_platform(hass, config, add_devices, discovery_info=None):
-    """Setup the Beaglebone Black GPIO devices."""
+def setup_platform(hass, config, add_entities, discovery_info=None):
+    """Set up the Beaglebone Black GPIO devices."""
     pins = config.get(CONF_PINS)
 
     binary_sensors = []
 
     for pin, params in pins.items():
         binary_sensors.append(BBBGPIOBinarySensor(pin, params))
-    add_devices(binary_sensors)
+    add_entities(binary_sensors)
 
 
 class BBBGPIOBinarySensor(BinarySensorDevice):
-    """Represent a binary sensor that uses Beaglebone Black GPIO."""
+    """Representation of a binary sensor that uses Beaglebone Black GPIO."""
 
     def __init__(self, pin, params):
         """Initialize the Beaglebone Black binary sensor."""

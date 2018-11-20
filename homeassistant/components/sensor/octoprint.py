@@ -7,75 +7,67 @@ https://home-assistant.io/components/sensor.octoprint/
 import logging
 
 import requests
-import voluptuous as vol
 
-from homeassistant.components.sensor import PLATFORM_SCHEMA
-from homeassistant.const import (
-    TEMP_CELSIUS, CONF_NAME, CONF_MONITORED_CONDITIONS)
+from homeassistant.components.octoprint import (SENSOR_TYPES,
+                                                DOMAIN as COMPONENT_DOMAIN)
+from homeassistant.const import (TEMP_CELSIUS)
 from homeassistant.helpers.entity import Entity
-from homeassistant.loader import get_component
-import homeassistant.helpers.config_validation as cv
-
 
 _LOGGER = logging.getLogger(__name__)
 
 DEPENDENCIES = ['octoprint']
-
-DEFAULT_NAME = 'OctoPrint'
-
-SENSOR_TYPES = {
-    # API Endpoint, Group, Key, unit
-    'Temperatures': ['printer', 'temperature', '*', TEMP_CELSIUS],
-    'Current State': ['printer', 'state', 'text', None],
-    'Job Percentage': ['job', 'progress', 'completion', '%'],
-}
-
-PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
-    vol.Optional(CONF_MONITORED_CONDITIONS, default=SENSOR_TYPES):
-        vol.All(cv.ensure_list, [vol.In(SENSOR_TYPES)]),
-    vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
-})
+NOTIFICATION_ID = 'octoprint_notification'
+NOTIFICATION_TITLE = 'OctoPrint sensor setup error'
 
 
-# pylint: disable=unused-argument
-def setup_platform(hass, config, add_devices, discovery_info=None):
-    """Setup the available OctoPrint sensors."""
-    octoprint = get_component('octoprint')
-    name = config.get(CONF_NAME)
-    monitored_conditions = config.get(CONF_MONITORED_CONDITIONS)
+def setup_platform(hass, config, add_entities, discovery_info=None):
+    """Set up the available OctoPrint sensors."""
+    if discovery_info is None:
+        return
+
+    name = discovery_info['name']
+    base_url = discovery_info['base_url']
+    monitored_conditions = discovery_info['sensors']
+    octoprint_api = hass.data[COMPONENT_DOMAIN][base_url]
+    tools = octoprint_api.get_tools()
+
+    if "Temperatures" in monitored_conditions:
+        if not tools:
+            hass.components.persistent_notification.create(
+                'Your printer appears to be offline.<br />'
+                'If you do not want to have your printer on <br />'
+                ' at all times, and you would like to monitor <br /> '
+                'temperatures, please add <br />'
+                'bed and/or number&#95of&#95tools to your config <br />'
+                'and restart.',
+                title=NOTIFICATION_TITLE,
+                notification_id=NOTIFICATION_ID)
 
     devices = []
     types = ["actual", "target"]
     for octo_type in monitored_conditions:
         if octo_type == "Temperatures":
-            for tool in octoprint.OCTOPRINT.get_tools():
+            for tool in tools:
                 for temp_type in types:
-                    new_sensor = OctoPrintSensor(octoprint.OCTOPRINT,
-                                                 temp_type,
-                                                 temp_type,
-                                                 name,
-                                                 SENSOR_TYPES[octo_type][3],
-                                                 SENSOR_TYPES[octo_type][0],
-                                                 SENSOR_TYPES[octo_type][1],
-                                                 tool)
+                    new_sensor = OctoPrintSensor(
+                        octoprint_api, temp_type, temp_type, name,
+                        SENSOR_TYPES[octo_type][3], SENSOR_TYPES[octo_type][0],
+                        SENSOR_TYPES[octo_type][1], tool)
                     devices.append(new_sensor)
         else:
-            new_sensor = OctoPrintSensor(octoprint.OCTOPRINT,
-                                         octo_type,
-                                         SENSOR_TYPES[octo_type][2],
-                                         name,
-                                         SENSOR_TYPES[octo_type][3],
-                                         SENSOR_TYPES[octo_type][0],
-                                         SENSOR_TYPES[octo_type][1])
+            new_sensor = OctoPrintSensor(
+                octoprint_api, octo_type, SENSOR_TYPES[octo_type][2],
+                name, SENSOR_TYPES[octo_type][3], SENSOR_TYPES[octo_type][0],
+                SENSOR_TYPES[octo_type][1], None, SENSOR_TYPES[octo_type][4])
             devices.append(new_sensor)
-    add_devices(devices)
+    add_entities(devices, True)
 
 
 class OctoPrintSensor(Entity):
     """Representation of an OctoPrint sensor."""
 
     def __init__(self, api, condition, sensor_type, sensor_name, unit,
-                 endpoint, group, tool=None):
+                 endpoint, group, tool=None, icon=None):
         """Initialize a new OctoPrint sensor."""
         self.sensor_name = sensor_name
         if tool is None:
@@ -90,8 +82,7 @@ class OctoPrintSensor(Entity):
         self.api_endpoint = endpoint
         self.api_group = group
         self.api_tool = tool
-        # Set initial state
-        self.update()
+        self._icon = icon
         _LOGGER.debug("Created OctoPrint sensor %r", self)
 
     @property
@@ -103,30 +94,29 @@ class OctoPrintSensor(Entity):
     def state(self):
         """Return the state of the sensor."""
         sensor_unit = self.unit_of_measurement
-        if sensor_unit == TEMP_CELSIUS or sensor_unit == "%":
+        if sensor_unit in (TEMP_CELSIUS, "%"):
             # API sometimes returns null and not 0
             if self._state is None:
                 self._state = 0
             return round(self._state, 2)
-        else:
-            return self._state
+        return self._state
 
     @property
     def unit_of_measurement(self):
-        """Unit of measurement of this entity, if any."""
+        """Return the unit of measurement of this entity, if any."""
         return self._unit_of_measurement
 
     def update(self):
         """Update state of sensor."""
         try:
-            self._state = self.api.update(self.sensor_type,
-                                          self.api_endpoint,
-                                          self.api_group,
-                                          self.api_tool)
+            self._state = self.api.update(
+                self.sensor_type, self.api_endpoint, self.api_group,
+                self.api_tool)
         except requests.exceptions.ConnectionError:
             # Error calling the api, already logged in api.update()
             return
 
-        if self._state is None:
-            _LOGGER.warning("Unable to locate value for %s", self.sensor_type)
-            return
+    @property
+    def icon(self):
+        """Icon to use in the frontend."""
+        return self._icon

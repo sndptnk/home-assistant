@@ -4,7 +4,6 @@ Trigger an automation when a LiteJet switch is released.
 For more details about this platform, please refer to the documentation at
 https://home-assistant.io/components/automation.litejet/
 """
-import asyncio
 import logging
 
 import voluptuous as vol
@@ -33,8 +32,7 @@ TRIGGER_SCHEMA = vol.Schema({
 })
 
 
-@asyncio.coroutine
-def async_trigger(hass, config, action):
+async def async_trigger(hass, config, action, automation_info):
     """Listen for events based on configuration."""
     number = config.get(CONF_NUMBER)
     held_more_than = config.get(CONF_HELD_MORE_THAN)
@@ -70,7 +68,7 @@ def async_trigger(hass, config, action):
         nonlocal held_less_than, held_more_than
         pressed_time = dt_util.utcnow()
         if held_more_than is None and held_less_than is None:
-            call_action()
+            hass.add_job(call_action)
         if held_more_than is not None and held_less_than is None:
             cancel_pressed_more_than = track_point_in_utc_time(
                 hass,
@@ -88,7 +86,7 @@ def async_trigger(hass, config, action):
         held_time = dt_util.utcnow() - pressed_time
         if held_less_than is not None and held_time < held_less_than:
             if held_more_than is None or held_time > held_more_than:
-                call_action()
+                hass.add_job(call_action)
 
     hass.data['litejet_system'].on_switch_pressed(number, pressed)
     hass.data['litejet_system'].on_switch_released(number, released)

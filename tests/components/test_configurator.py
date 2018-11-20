@@ -13,7 +13,7 @@ class TestConfigurator(unittest.TestCase):
 
     # pylint: disable=invalid-name
     def setUp(self):
-        """Setup things to be run when tests are started."""
+        """Set up things to be run when tests are started."""
         self.hass = get_test_home_assistant()
 
     # pylint: disable=invalid-name
@@ -26,30 +26,31 @@ class TestConfigurator(unittest.TestCase):
         request_id = configurator.request_config(
             self.hass, "Test Request", lambda _: None)
 
-        self.assertEqual(
-            1, len(self.hass.services.services.get(configurator.DOMAIN, [])),
-            "No new service registered")
+        assert 1 == \
+            len(self.hass.services.services.get(configurator.DOMAIN, [])), \
+            "No new service registered"
 
         states = self.hass.states.all()
 
-        self.assertEqual(1, len(states), "Expected a new state registered")
+        assert 1 == len(states), "Expected a new state registered"
 
         state = states[0]
 
-        self.assertEqual(configurator.STATE_CONFIGURE, state.state)
-        self.assertEqual(
-            request_id, state.attributes.get(configurator.ATTR_CONFIGURE_ID))
+        assert configurator.STATE_CONFIGURE == state.state
+        assert \
+            request_id == state.attributes.get(configurator.ATTR_CONFIGURE_ID)
 
     def test_request_all_info(self):
         """Test request config with all possible info."""
         exp_attr = {
             ATTR_FRIENDLY_NAME: "Test Request",
-            configurator.ATTR_DESCRIPTION: "config description",
-            configurator.ATTR_DESCRIPTION_IMAGE: "config image url",
+            configurator.ATTR_DESCRIPTION: """config description
+
+[link name](link url)
+
+![Description image](config image url)""",
             configurator.ATTR_SUBMIT_CAPTION: "config submit caption",
             configurator.ATTR_FIELDS: [],
-            configurator.ATTR_LINK_NAME: "link name",
-            configurator.ATTR_LINK_URL: "link url",
             configurator.ATTR_ENTITY_PICTURE: "config entity picture",
             configurator.ATTR_CONFIGURE_ID: configurator.request_config(
                 self.hass,
@@ -66,11 +67,11 @@ class TestConfigurator(unittest.TestCase):
         }
 
         states = self.hass.states.all()
-        self.assertEqual(1, len(states))
+        assert 1 == len(states)
         state = states[0]
 
-        self.assertEqual(configurator.STATE_CONFIGURE, state.state)
-        assert exp_attr == dict(state.attributes)
+        assert configurator.STATE_CONFIGURE == state.state
+        assert exp_attr == state.attributes
 
     def test_callback_called_on_configure(self):
         """Test if our callback gets called when configure service called."""
@@ -83,33 +84,33 @@ class TestConfigurator(unittest.TestCase):
             {configurator.ATTR_CONFIGURE_ID: request_id})
 
         self.hass.block_till_done()
-        self.assertEqual(1, len(calls), "Callback not called")
+        assert 1 == len(calls), "Callback not called"
 
     def test_state_change_on_notify_errors(self):
         """Test state change on notify errors."""
         request_id = configurator.request_config(
             self.hass, "Test Request", lambda _: None)
         error = "Oh no bad bad bad"
-        configurator.notify_errors(request_id, error)
+        configurator.notify_errors(self.hass, request_id, error)
 
         state = self.hass.states.all()[0]
-        self.assertEqual(error, state.attributes.get(configurator.ATTR_ERRORS))
+        assert error == state.attributes.get(configurator.ATTR_ERRORS)
 
     def test_notify_errors_fail_silently_on_bad_request_id(self):
         """Test if notify errors fails silently with a bad request id."""
-        configurator.notify_errors(2015, "Try this error")
+        configurator.notify_errors(self.hass, 2015, "Try this error")
 
     def test_request_done_works(self):
         """Test if calling request done works."""
         request_id = configurator.request_config(
             self.hass, "Test Request", lambda _: None)
-        configurator.request_done(request_id)
-        self.assertEqual(1, len(self.hass.states.all()))
+        configurator.request_done(self.hass, request_id)
+        assert 1 == len(self.hass.states.all())
 
         self.hass.bus.fire(EVENT_TIME_CHANGED)
         self.hass.block_till_done()
-        self.assertEqual(0, len(self.hass.states.all()))
+        assert 0 == len(self.hass.states.all())
 
     def test_request_done_fail_silently_on_bad_request_id(self):
         """Test that request_done fails silently with a bad request id."""
-        configurator.request_done(2016)
+        configurator.request_done(self.hass, 2016)

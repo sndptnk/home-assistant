@@ -27,7 +27,7 @@ CONFIG = {
         'devices': {
             'protocol_0_0': {
                 'name': 'test',
-                'aliasses': ['test_alias_0_0'],
+                'aliases': ['test_alias_0_0'],
             },
             'dimmable_0_0': {
                 'name': 'dim_test',
@@ -53,12 +53,12 @@ def test_default_setup(hass, monkeypatch):
     assert create.call_args_list[0][1]['ignore']
 
     # test default state of light loaded from config
-    light_initial = hass.states.get('light.test')
+    light_initial = hass.states.get(DOMAIN + '.test')
     assert light_initial.state == 'off'
     assert light_initial.attributes['assumed_state']
 
     # light should follow state of the hardware device by interpreting
-    # incoming events for its name and aliasses
+    # incoming events for its name and aliases
 
     # mock incoming command event for this device
     event_callback({
@@ -67,10 +67,10 @@ def test_default_setup(hass, monkeypatch):
     })
     yield from hass.async_block_till_done()
 
-    light_after_first_command = hass.states.get('light.test')
+    light_after_first_command = hass.states.get(DOMAIN + '.test')
     assert light_after_first_command.state == 'on'
     # also after receiving first command state not longer has to be assumed
-    assert 'assumed_state' not in light_after_first_command.attributes
+    assert not light_after_first_command.attributes.get('assumed_state')
 
     # mock incoming command event for this device
     event_callback({
@@ -79,9 +79,28 @@ def test_default_setup(hass, monkeypatch):
     })
     yield from hass.async_block_till_done()
 
-    assert hass.states.get('light.test').state == 'off'
+    assert hass.states.get(DOMAIN + '.test').state == 'off'
 
-    # test following aliasses
+    # should repond to group command
+    event_callback({
+        'id': 'protocol_0_0',
+        'command': 'allon',
+    })
+    yield from hass.async_block_till_done()
+
+    light_after_first_command = hass.states.get(DOMAIN + '.test')
+    assert light_after_first_command.state == 'on'
+
+    # should repond to group command
+    event_callback({
+        'id': 'protocol_0_0',
+        'command': 'alloff',
+    })
+    yield from hass.async_block_till_done()
+
+    assert hass.states.get(DOMAIN + '.test').state == 'off'
+
+    # test following aliases
     # mock incoming command event for this device alias
     event_callback({
         'id': 'test_alias_0_0',
@@ -89,7 +108,7 @@ def test_default_setup(hass, monkeypatch):
     })
     yield from hass.async_block_till_done()
 
-    assert hass.states.get('light.test').state == 'on'
+    assert hass.states.get(DOMAIN + '.test').state == 'on'
 
     # test event for new unconfigured sensor
     event_callback({
@@ -98,22 +117,22 @@ def test_default_setup(hass, monkeypatch):
     })
     yield from hass.async_block_till_done()
 
-    assert hass.states.get('light.protocol2_0_1').state == 'on'
+    assert hass.states.get(DOMAIN + '.protocol2_0_1').state == 'on'
 
     # test changing state from HA propagates to Rflink
     hass.async_add_job(
         hass.services.async_call(DOMAIN, SERVICE_TURN_OFF,
-                                 {ATTR_ENTITY_ID: 'light.test'}))
+                                 {ATTR_ENTITY_ID: DOMAIN + '.test'}))
     yield from hass.async_block_till_done()
-    assert hass.states.get('light.test').state == 'off'
+    assert hass.states.get(DOMAIN + '.test').state == 'off'
     assert protocol.send_command_ack.call_args_list[0][0][0] == 'protocol_0_0'
     assert protocol.send_command_ack.call_args_list[0][0][1] == 'off'
 
     hass.async_add_job(
         hass.services.async_call(DOMAIN, SERVICE_TURN_ON,
-                                 {ATTR_ENTITY_ID: 'light.test'}))
+                                 {ATTR_ENTITY_ID: DOMAIN + '.test'}))
     yield from hass.async_block_till_done()
-    assert hass.states.get('light.test').state == 'on'
+    assert hass.states.get(DOMAIN + '.test').state == 'on'
     assert protocol.send_command_ack.call_args_list[1][0][1] == 'on'
 
     # protocols supporting dimming and on/off should create hybrid light entity
@@ -124,7 +143,7 @@ def test_default_setup(hass, monkeypatch):
     yield from hass.async_block_till_done()
     hass.async_add_job(
         hass.services.async_call(DOMAIN, SERVICE_TURN_ON,
-                                 {ATTR_ENTITY_ID: 'light.newkaku_0_1'}))
+                                 {ATTR_ENTITY_ID: DOMAIN + '.newkaku_0_1'}))
     yield from hass.async_block_till_done()
 
     # dimmable should send highest dim level when turning on
@@ -136,7 +155,7 @@ def test_default_setup(hass, monkeypatch):
     hass.async_add_job(
         hass.services.async_call(DOMAIN, SERVICE_TURN_ON,
                                  {
-                                     ATTR_ENTITY_ID: 'light.newkaku_0_1',
+                                     ATTR_ENTITY_ID: DOMAIN + '.newkaku_0_1',
                                      ATTR_BRIGHTNESS: 128,
                                  }))
     yield from hass.async_block_till_done()
@@ -146,7 +165,7 @@ def test_default_setup(hass, monkeypatch):
     hass.async_add_job(
         hass.services.async_call(DOMAIN, SERVICE_TURN_ON,
                                  {
-                                     ATTR_ENTITY_ID: 'light.dim_test',
+                                     ATTR_ENTITY_ID: DOMAIN + '.dim_test',
                                      ATTR_BRIGHTNESS: 128,
                                  }))
     yield from hass.async_block_till_done()
@@ -166,7 +185,7 @@ def test_firing_bus_event(hass, monkeypatch):
             'devices': {
                 'protocol_0_0': {
                     'name': 'test',
-                    'aliasses': ['test_alias_0_0'],
+                    'aliases': ['test_alias_0_0'],
                     'fire_event': True,
                 },
             },
@@ -191,7 +210,7 @@ def test_firing_bus_event(hass, monkeypatch):
     })
     yield from hass.async_block_till_done()
 
-    assert calls[0].data == {'state': 'off', 'entity_id': 'light.test'}
+    assert calls[0].data == {'state': 'off', 'entity_id': DOMAIN + '.test'}
 
 
 @asyncio.coroutine
@@ -228,17 +247,17 @@ def test_signal_repetitions(hass, monkeypatch):
     # test if signal repetition is performed according to configuration
     hass.async_add_job(
         hass.services.async_call(DOMAIN, SERVICE_TURN_OFF,
-                                 {ATTR_ENTITY_ID: 'light.test'}))
+                                 {ATTR_ENTITY_ID: DOMAIN + '.test'}))
 
     # wait for commands and repetitions to finish
     yield from hass.async_block_till_done()
 
     assert protocol.send_command_ack.call_count == 2
 
-    # test if default apply to configured devcies
+    # test if default apply to configured devices
     hass.async_add_job(
         hass.services.async_call(DOMAIN, SERVICE_TURN_OFF,
-                                 {ATTR_ENTITY_ID: 'light.test1'}))
+                                 {ATTR_ENTITY_ID: DOMAIN + '.test1'}))
 
     # wait for commands and repetitions to finish
     yield from hass.async_block_till_done()
@@ -256,7 +275,7 @@ def test_signal_repetitions(hass, monkeypatch):
 
     hass.async_add_job(
         hass.services.async_call(DOMAIN, SERVICE_TURN_OFF,
-                                 {ATTR_ENTITY_ID: 'light.protocol_0_2'}))
+                                 {ATTR_ENTITY_ID: DOMAIN + '.protocol_0_2'}))
 
     # wait for commands and repetitions to finish
     yield from hass.async_block_till_done()
@@ -292,10 +311,10 @@ def test_signal_repetitions_alternation(hass, monkeypatch):
 
     hass.async_add_job(
         hass.services.async_call(DOMAIN, SERVICE_TURN_OFF,
-                                 {ATTR_ENTITY_ID: 'light.test'}))
+                                 {ATTR_ENTITY_ID: DOMAIN + '.test'}))
     hass.async_add_job(
         hass.services.async_call(DOMAIN, SERVICE_TURN_OFF,
-                                 {ATTR_ENTITY_ID: 'light.test1'}))
+                                 {ATTR_ENTITY_ID: DOMAIN + '.test1'}))
 
     yield from hass.async_block_till_done()
 
@@ -329,19 +348,18 @@ def test_signal_repetitions_cancelling(hass, monkeypatch):
 
     hass.async_add_job(
         hass.services.async_call(DOMAIN, SERVICE_TURN_OFF,
-                                 {ATTR_ENTITY_ID: 'light.test'}))
+                                 {ATTR_ENTITY_ID: DOMAIN + '.test'}))
 
     hass.async_add_job(
         hass.services.async_call(DOMAIN, SERVICE_TURN_ON,
-                                 {ATTR_ENTITY_ID: 'light.test'}))
+                                 {ATTR_ENTITY_ID: DOMAIN + '.test'}))
 
     yield from hass.async_block_till_done()
 
-    print(protocol.send_command_ack.call_args_list)
-    assert protocol.send_command_ack.call_args_list[0][0][1] == 'off'
-    assert protocol.send_command_ack.call_args_list[1][0][1] == 'on'
-    assert protocol.send_command_ack.call_args_list[2][0][1] == 'on'
-    assert protocol.send_command_ack.call_args_list[3][0][1] == 'on'
+    assert protocol.send_command_ack.call_args_list[0][0][1] == 'on'
+    assert protocol.send_command_ack.call_args_list[1][0][1] == 'off'
+    assert protocol.send_command_ack.call_args_list[2][0][1] == 'off'
+    assert protocol.send_command_ack.call_args_list[3][0][1] == 'off'
 
 
 @asyncio.coroutine
@@ -366,7 +384,7 @@ def test_type_toggle(hass, monkeypatch):
     event_callback, _, _, _ = yield from mock_rflink(
         hass, config, DOMAIN, monkeypatch)
 
-    assert hass.states.get('light.toggle_test').state == 'off'
+    assert hass.states.get(DOMAIN + '.toggle_test').state == 'off'
 
     # test sending on command to toggle alias
     event_callback({
@@ -375,7 +393,7 @@ def test_type_toggle(hass, monkeypatch):
     })
     yield from hass.async_block_till_done()
 
-    assert hass.states.get('light.toggle_test').state == 'on'
+    assert hass.states.get(DOMAIN + '.toggle_test').state == 'on'
 
     # test sending group command to group alias
     event_callback({
@@ -384,4 +402,161 @@ def test_type_toggle(hass, monkeypatch):
     })
     yield from hass.async_block_till_done()
 
-    assert hass.states.get('light.toggle_test').state == 'off'
+    assert hass.states.get(DOMAIN + '.toggle_test').state == 'off'
+
+
+@asyncio.coroutine
+def test_group_alias(hass, monkeypatch):
+    """Group aliases should only respond to group commands (allon/alloff)."""
+    config = {
+        'rflink': {
+            'port': '/dev/ttyABC0',
+        },
+        DOMAIN: {
+            'platform': 'rflink',
+            'devices': {
+                'protocol_0_0': {
+                    'name': 'test',
+                    'group_aliases': ['test_group_0_0'],
+                },
+            },
+        },
+    }
+
+    # setup mocking rflink module
+    event_callback, _, _, _ = yield from mock_rflink(
+        hass, config, DOMAIN, monkeypatch)
+
+    assert hass.states.get(DOMAIN + '.test').state == 'off'
+
+    # test sending group command to group alias
+    event_callback({
+        'id': 'test_group_0_0',
+        'command': 'allon',
+    })
+    yield from hass.async_block_till_done()
+
+    assert hass.states.get(DOMAIN + '.test').state == 'on'
+
+    # test sending group command to group alias
+    event_callback({
+        'id': 'test_group_0_0',
+        'command': 'off',
+    })
+    yield from hass.async_block_till_done()
+
+    assert hass.states.get(DOMAIN + '.test').state == 'on'
+
+
+@asyncio.coroutine
+def test_nogroup_alias(hass, monkeypatch):
+    """Non group aliases should not respond to group commands."""
+    config = {
+        'rflink': {
+            'port': '/dev/ttyABC0',
+        },
+        DOMAIN: {
+            'platform': 'rflink',
+            'devices': {
+                'protocol_0_0': {
+                    'name': 'test',
+                    'nogroup_aliases': ['test_nogroup_0_0'],
+                },
+            },
+        },
+    }
+
+    # setup mocking rflink module
+    event_callback, _, _, _ = yield from mock_rflink(
+        hass, config, DOMAIN, monkeypatch)
+
+    assert hass.states.get(DOMAIN + '.test').state == 'off'
+
+    # test sending group command to nogroup alias
+    event_callback({
+        'id': 'test_nogroup_0_0',
+        'command': 'allon',
+    })
+    yield from hass.async_block_till_done()
+    # should not affect state
+    assert hass.states.get(DOMAIN + '.test').state == 'off'
+
+    # test sending group command to nogroup alias
+    event_callback({
+        'id': 'test_nogroup_0_0',
+        'command': 'on',
+    })
+    yield from hass.async_block_till_done()
+    # should affect state
+    assert hass.states.get(DOMAIN + '.test').state == 'on'
+
+
+@asyncio.coroutine
+def test_nogroup_device_id(hass, monkeypatch):
+    """Device id that do not respond to group commands (allon/alloff)."""
+    config = {
+        'rflink': {
+            'port': '/dev/ttyABC0',
+        },
+        DOMAIN: {
+            'platform': 'rflink',
+            'devices': {
+                'test_nogroup_0_0': {
+                    'name': 'test',
+                    'group': False,
+                },
+            },
+        },
+    }
+
+    # setup mocking rflink module
+    event_callback, _, _, _ = yield from mock_rflink(
+        hass, config, DOMAIN, monkeypatch)
+
+    assert hass.states.get(DOMAIN + '.test').state == 'off'
+
+    # test sending group command to nogroup
+    event_callback({
+        'id': 'test_nogroup_0_0',
+        'command': 'allon',
+    })
+    yield from hass.async_block_till_done()
+    # should not affect state
+    assert hass.states.get(DOMAIN + '.test').state == 'off'
+
+    # test sending group command to nogroup
+    event_callback({
+        'id': 'test_nogroup_0_0',
+        'command': 'on',
+    })
+    yield from hass.async_block_till_done()
+    # should affect state
+    assert hass.states.get(DOMAIN + '.test').state == 'on'
+
+
+@asyncio.coroutine
+def test_disable_automatic_add(hass, monkeypatch):
+    """If disabled new devices should not be automatically added."""
+    config = {
+        'rflink': {
+            'port': '/dev/ttyABC0',
+        },
+        DOMAIN: {
+            'platform': 'rflink',
+            'automatic_add': False,
+        },
+    }
+
+    # setup mocking rflink module
+    event_callback, _, _, _ = yield from mock_rflink(
+        hass, config, DOMAIN, monkeypatch)
+
+    # test event for new unconfigured sensor
+    event_callback({
+        'id': 'protocol_0_0',
+        'command': 'off',
+    })
+    yield from hass.async_block_till_done()
+
+    # make sure new device is not added
+    assert not hass.states.get(DOMAIN + '.protocol_0_0')

@@ -1,20 +1,15 @@
 """
-Zwave platform that handles simple door locks.
+Z-Wave platform that handles simple door locks.
 
 For more details about this platform, please refer to the documentation at
 https://home-assistant.io/components/lock.zwave/
 """
-# Because we do not compile openzwave on CI
-# pylint: disable=import-error
 import logging
-from os import path
 
 import voluptuous as vol
 
 from homeassistant.components.lock import DOMAIN, LockDevice
 from homeassistant.components import zwave
-from homeassistant.components.zwave import async_setup_platform  # noqa # pylint: disable=unused-import
-from homeassistant.config import load_yaml_config_file
 import homeassistant.helpers.config_validation as cv
 
 _LOGGER = logging.getLogger(__name__)
@@ -33,9 +28,22 @@ POLYCONTROL = 0x10E
 DANALOCK_V2_BTZE = 0x2
 POLYCONTROL_DANALOCK_V2_BTZE_LOCK = (POLYCONTROL, DANALOCK_V2_BTZE)
 WORKAROUND_V2BTZE = 'v2btze'
+WORKAROUND_DEVICE_STATE = 'state'
 
 DEVICE_MAPPINGS = {
-    POLYCONTROL_DANALOCK_V2_BTZE_LOCK: WORKAROUND_V2BTZE
+    POLYCONTROL_DANALOCK_V2_BTZE_LOCK: WORKAROUND_V2BTZE,
+    # Kwikset 914TRL ZW500
+    (0x0090, 0x440): WORKAROUND_DEVICE_STATE,
+    # Yale YRD210
+    (0x0129, 0x0209): WORKAROUND_DEVICE_STATE,
+    (0x0129, 0xAA00): WORKAROUND_DEVICE_STATE,
+    (0x0129, 0x0000): WORKAROUND_DEVICE_STATE,
+    # Yale YRD220 (as reported by adrum in PR #17386)
+    (0x0109, 0x0000): WORKAROUND_DEVICE_STATE,
+    # Schlage BE469
+    (0x003B, 0x5044): WORKAROUND_DEVICE_STATE,
+    # Schlage FE599NX
+    (0x003B, 0x504C): WORKAROUND_DEVICE_STATE,
 }
 
 LOCK_NOTIFICATION = {
@@ -51,10 +59,11 @@ LOCK_NOTIFICATION = {
 
 LOCK_ALARM_TYPE = {
     '9': 'Deadbolt Jammed',
+    '16': 'Unlocked by Bluetooth ',
     '18': 'Locked with Keypad by user ',
     '19': 'Unlocked with Keypad by user ',
-    '21': 'Manually Locked by',
-    '22': 'Manually Unlocked by Key or Inside thumb turn',
+    '21': 'Manually Locked ',
+    '22': 'Manually Unlocked ',
     '24': 'Locked by RF',
     '25': 'Unlocked by RF',
     '27': 'Auto re-lock',
@@ -62,6 +71,7 @@ LOCK_ALARM_TYPE = {
     '112': 'Master code changed or User added: ',
     '113': 'Duplicate Pin-code: ',
     '130': 'RF module, power restored',
+    '144': 'Unlocked by NFC Tag or Card by user ',
     '161': 'Tamper Alarm: ',
     '167': 'Low Battery',
     '168': 'Critical Battery Level',
@@ -69,8 +79,8 @@ LOCK_ALARM_TYPE = {
 }
 
 MANUAL_LOCK_ALARM_LEVEL = {
-    '1': 'Key Cylinder or Inside thumb turn',
-    '2': 'Touch function (lock and leave)'
+    '1': 'by Key Cylinder or Inside thumb turn',
+    '2': 'by Touch function (lock and leave)'
 }
 
 TAMPER_ALARM_LEVEL = {
@@ -100,7 +110,8 @@ ALARM_TYPE_STD = [
     '19',
     '33',
     '112',
-    '113'
+    '113',
+    '144'
 ]
 
 SET_USERCODE_SCHEMA = vol.Schema({
@@ -120,15 +131,18 @@ CLEAR_USERCODE_SCHEMA = vol.Schema({
 })
 
 
-def get_device(hass, node, values, **kwargs):
-    """Create zwave entity device."""
-    descriptions = load_yaml_config_file(
-        path.join(path.dirname(__file__), 'services.yaml'))
+async def async_setup_platform(hass, config, async_add_entities,
+                               discovery_info=None):
+    """Set up the Z-Wave Lock platform."""
+    await zwave.async_setup_platform(
+        hass, config, async_add_entities, discovery_info)
+
+    network = hass.data[zwave.const.DATA_NETWORK]
 
     def set_usercode(service):
         """Set the usercode to index X on the lock."""
         node_id = service.data.get(zwave.const.ATTR_NODE_ID)
-        lock_node = zwave.NETWORK.nodes[node_id]
+        lock_node = network.nodes[node_id]
         code_slot = service.data.get(ATTR_CODE_SLOT)
         usercode = service.data.get(ATTR_USERCODE)
 
@@ -136,30 +150,32 @@ def get_device(hass, node, values, **kwargs):
                 class_id=zwave.const.COMMAND_CLASS_USER_CODE).values():
             if value.index != code_slot:
                 continue
-            if len(str(usercode)) > 4:
-                _LOGGER.error('Invalid code provided: (%s)'
-                              ' usercode must %s or less digits',
+            if len(str(usercode)) < 4:
+                _LOGGER.error("Invalid code provided: (%s) "
+                              "usercode must be atleast 4 and at most"
+                              " %s digits",
                               usercode, len(value.data))
+                break
             value.data = str(usercode)
             break
 
     def get_usercode(service):
         """Get a usercode at index X on the lock."""
         node_id = service.data.get(zwave.const.ATTR_NODE_ID)
-        lock_node = zwave.NETWORK.nodes[node_id]
+        lock_node = network.nodes[node_id]
         code_slot = service.data.get(ATTR_CODE_SLOT)
 
         for value in lock_node.get_values(
                 class_id=zwave.const.COMMAND_CLASS_USER_CODE).values():
             if value.index != code_slot:
                 continue
-            _LOGGER.info('Usercode at slot %s is: %s', value.index, value.data)
+            _LOGGER.info("Usercode at slot %s is: %s", value.index, value.data)
             break
 
     def clear_usercode(service):
         """Set usercode to slot X on the lock."""
         node_id = service.data.get(zwave.const.ATTR_NODE_ID)
-        lock_node = zwave.NETWORK.nodes[node_id]
+        lock_node = network.nodes[node_id]
         code_slot = service.data.get(ATTR_CODE_SLOT)
         data = ''
 
@@ -172,25 +188,22 @@ def get_device(hass, node, values, **kwargs):
                 i += 1
             _LOGGER.debug('Data to clear lock: %s', data)
             value.data = data
-            _LOGGER.info('Usercode at slot %s is cleared', value.index)
+            _LOGGER.info("Usercode at slot %s is cleared", value.index)
             break
 
-    if node.has_command_class(zwave.const.COMMAND_CLASS_USER_CODE):
-        hass.services.register(DOMAIN,
-                               SERVICE_SET_USERCODE,
-                               set_usercode,
-                               descriptions.get(SERVICE_SET_USERCODE),
-                               schema=SET_USERCODE_SCHEMA)
-        hass.services.register(DOMAIN,
-                               SERVICE_GET_USERCODE,
-                               get_usercode,
-                               descriptions.get(SERVICE_GET_USERCODE),
-                               schema=GET_USERCODE_SCHEMA)
-        hass.services.register(DOMAIN,
-                               SERVICE_CLEAR_USERCODE,
-                               clear_usercode,
-                               descriptions.get(SERVICE_CLEAR_USERCODE),
-                               schema=CLEAR_USERCODE_SCHEMA)
+    hass.services.async_register(
+        DOMAIN, SERVICE_SET_USERCODE, set_usercode,
+        schema=SET_USERCODE_SCHEMA)
+    hass.services.async_register(
+        DOMAIN, SERVICE_GET_USERCODE, get_usercode,
+        schema=GET_USERCODE_SCHEMA)
+    hass.services.async_register(
+        DOMAIN, SERVICE_CLEAR_USERCODE, clear_usercode,
+        schema=CLEAR_USERCODE_SCHEMA)
+
+
+def get_device(node, values, **kwargs):
+    """Create Z-Wave entity device."""
     return ZwaveLock(values)
 
 
@@ -204,6 +217,7 @@ class ZwaveLock(zwave.ZWaveDeviceEntity, LockDevice):
         self._notification = None
         self._lock_status = None
         self._v2btze = None
+        self._state_workaround = False
 
         # Enable appropriate workaround flags for our device
         # Make sure that we have values for the key before converting to int
@@ -216,48 +230,53 @@ class ZwaveLock(zwave.ZWaveDeviceEntity, LockDevice):
                     self._v2btze = 1
                     _LOGGER.debug("Polycontrol Danalock v2 BTZE "
                                   "workaround enabled")
+                if DEVICE_MAPPINGS[specific_sensor_key] == \
+                        WORKAROUND_DEVICE_STATE:
+                    self._state_workaround = True
+                    _LOGGER.debug(
+                        "Notification device state workaround enabled")
         self.update_properties()
 
     def update_properties(self):
-        """Callback on data changes for node values."""
+        """Handle data changes for node values."""
         self._state = self.values.primary.data
-        _LOGGER.debug('Lock state set from Bool value and'
-                      ' is %s', self._state)
+        _LOGGER.debug("Lock state set from Bool value and is %s", self._state)
         if self.values.access_control:
             notification_data = self.values.access_control.data
             self._notification = LOCK_NOTIFICATION.get(str(notification_data))
-
+            if self._state_workaround:
+                self._state = LOCK_STATUS.get(str(notification_data))
             if self._v2btze:
                 if self.values.v2btze_advanced and \
                         self.values.v2btze_advanced.data == CONFIG_ADVANCED:
                     self._state = LOCK_STATUS.get(str(notification_data))
-                    _LOGGER.debug('Lock state set from Access Control '
-                                  'value and is %s, get=%s',
-                                  str(notification_data),
-                                  self.state)
+                    _LOGGER.debug(
+                        "Lock state set from Access Control value and is %s, "
+                        "get=%s", str(notification_data), self.state)
 
         if not self.values.alarm_type:
             return
 
         alarm_type = self.values.alarm_type.data
-        _LOGGER.debug('Lock alarm_type is %s', str(alarm_type))
+        _LOGGER.debug("Lock alarm_type is %s", str(alarm_type))
         if self.values.alarm_level:
             alarm_level = self.values.alarm_level.data
         else:
             alarm_level = None
-        _LOGGER.debug('Lock alarm_level is %s', str(alarm_level))
+        _LOGGER.debug("Lock alarm_level is %s", str(alarm_level))
 
         if not alarm_type:
             return
-        if alarm_type is 21:
+        if alarm_type == 21:
             self._lock_status = '{}{}'.format(
                 LOCK_ALARM_TYPE.get(str(alarm_type)),
                 MANUAL_LOCK_ALARM_LEVEL.get(str(alarm_level)))
-        if alarm_type in ALARM_TYPE_STD:
+            return
+        if str(alarm_type) in ALARM_TYPE_STD:
             self._lock_status = '{}{}'.format(
                 LOCK_ALARM_TYPE.get(str(alarm_type)), str(alarm_level))
             return
-        if alarm_type is 161:
+        if alarm_type == 161:
             self._lock_status = '{}{}'.format(
                 LOCK_ALARM_TYPE.get(str(alarm_type)),
                 TAMPER_ALARM_LEVEL.get(str(alarm_level)))

@@ -5,21 +5,34 @@ For more details about this platform, please refer to the documentation
 at https://home-assistant.io/components/sensor.zwave/
 """
 import logging
-# Because we do not compile openzwave on CI
-# pylint: disable=import-error
+from homeassistant.core import callback
 from homeassistant.components.sensor import DOMAIN
 from homeassistant.components import zwave
 from homeassistant.const import TEMP_CELSIUS, TEMP_FAHRENHEIT
-from homeassistant.components.zwave import async_setup_platform  # noqa # pylint: disable=unused-import
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 _LOGGER = logging.getLogger(__name__)
 
 
+async def async_setup_platform(hass, config, async_add_entities,
+                               discovery_info=None):
+    """Old method of setting up Z-Wave sensors."""
+    pass
+
+
+async def async_setup_entry(hass, config_entry, async_add_entities):
+    """Set up Z-Wave Sensor from Config Entry."""
+    @callback
+    def async_add_sensor(sensor):
+        """Add Z-Wave Sensor."""
+        async_add_entities([sensor])
+
+    async_dispatcher_connect(hass, 'zwave_new_sensor', async_add_sensor)
+
+
 def get_device(node, values, **kwargs):
-    """Create zwave entity device."""
+    """Create Z-Wave entity device."""
     # Generic Device mappings
-    if values.primary.command_class == zwave.const.COMMAND_CLASS_BATTERY:
-        return ZWaveSensor(values)
     if node.has_command_class(zwave.const.COMMAND_CLASS_SENSOR_MULTILEVEL):
         return ZWaveMultilevelSensor(values)
     if node.has_command_class(zwave.const.COMMAND_CLASS_METER) and \
@@ -40,7 +53,7 @@ class ZWaveSensor(zwave.ZWaveDeviceEntity):
         self.update_properties()
 
     def update_properties(self):
-        """Callback on data changes for node values."""
+        """Handle the data changes for node values."""
         self._state = self.values.primary.data
         self._units = self.values.primary.units
 
@@ -68,7 +81,7 @@ class ZWaveMultilevelSensor(ZWaveSensor):
         """Return the state of the sensor."""
         if self._units in ('C', 'F'):
             return round(self._state, 1)
-        elif isinstance(self._state, float):
+        if isinstance(self._state, float):
             return round(self._state, 2)
 
         return self._state
@@ -78,10 +91,9 @@ class ZWaveMultilevelSensor(ZWaveSensor):
         """Return the unit the value is expressed in."""
         if self._units == 'C':
             return TEMP_CELSIUS
-        elif self._units == 'F':
+        if self._units == 'F':
             return TEMP_FAHRENHEIT
-        else:
-            return self._units
+        return self._units
 
 
 class ZWaveAlarmSensor(ZWaveSensor):

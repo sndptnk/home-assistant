@@ -11,20 +11,18 @@ from collections import namedtuple
 import asyncio
 import aiohttp
 import async_timeout
-
 import voluptuous as vol
-import homeassistant.helpers.config_validation as cv
 
+import homeassistant.helpers.config_validation as cv
 from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
 from homeassistant.util import Throttle
 from homeassistant.components.device_tracker import (
     DOMAIN, PLATFORM_SCHEMA, DeviceScanner)
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
-# Configuration constant specific for tado
-CONF_HOME_ID = 'home_id'
-
 _LOGGER = logging.getLogger(__name__)
+
+CONF_HOME_ID = 'home_id'
 
 MIN_TIME_BETWEEN_SCANS = timedelta(seconds=30)
 
@@ -70,33 +68,28 @@ class TadoDeviceScanner(DeviceScanner):
         self.websession = async_create_clientsession(
             hass, cookie_jar=aiohttp.CookieJar(unsafe=True, loop=hass.loop))
 
-        self.success_init = self._update_info()
-        _LOGGER.info("Tado scanner initialized")
+        self.success_init = asyncio.run_coroutine_threadsafe(
+            self._async_update_info(), hass.loop
+        ).result()
 
-    @asyncio.coroutine
-    def async_scan_devices(self):
+        _LOGGER.info("Scanner initialized")
+
+    async def async_scan_devices(self):
         """Scan for devices and return a list containing found device ids."""
-        info = self._update_info()
-
-        # Don't yield if we got None
-        if info is not None:
-            yield from info
-
+        await self._async_update_info()
         return [device.mac for device in self.last_results]
 
-    @asyncio.coroutine
-    def async_get_device_name(self, mac):
+    async def async_get_device_name(self, device):
         """Return the name of the given device or None if we don't know."""
-        filter_named = [device.name for device in self.last_results
-                        if device.mac == mac]
+        filter_named = [result.name for result in self.last_results
+                        if result.mac == device]
 
         if filter_named:
             return filter_named[0]
-        else:
-            return None
+        return None
 
     @Throttle(MIN_TIME_BETWEEN_SCANS)
-    def _update_info(self):
+    async def _async_update_info(self):
         """
         Query Tado for device marked as at home.
 
@@ -105,35 +98,27 @@ class TadoDeviceScanner(DeviceScanner):
         _LOGGER.debug("Requesting Tado")
 
         last_results = []
-        response = None
-        tado_json = None
 
         try:
-            with async_timeout.timeout(10, loop=self.hass.loop):
+            with async_timeout.timeout(10):
                 # Format the URL here, so we can log the template URL if
                 # anything goes wrong without exposing username and password.
-                url = self.tadoapiurl.format(home_id=self.home_id,
-                                             username=self.username,
-                                             password=self.password)
+                url = self.tadoapiurl.format(
+                    home_id=self.home_id, username=self.username,
+                    password=self.password)
 
-                # Go get 'em!
-                response = yield from self.websession.get(url)
+                response = await self.websession.get(url)
 
-                # error on Tado webservice
                 if response.status != 200:
                     _LOGGER.warning(
                         "Error %d on %s.", response.status, self.tadoapiurl)
-                    return
+                    return False
 
-                tado_json = yield from response.json()
+                tado_json = await response.json()
 
-        except (asyncio.TimeoutError, aiohttp.errors.ClientError):
+        except (asyncio.TimeoutError, aiohttp.ClientError):
             _LOGGER.error("Cannot load Tado data")
             return False
-
-        finally:
-            if response is not None:
-                yield from response.release()
 
         # Without a home_id, we fetched an URL where the mobile devices can be
         # found under the mobileDevices key.
@@ -150,7 +135,7 @@ class TadoDeviceScanner(DeviceScanner):
 
         self.last_results = last_results
 
-        _LOGGER.info(
+        _LOGGER.debug(
             "Tado presence query successful, %d device(s) at home",
             len(self.last_results)
         )

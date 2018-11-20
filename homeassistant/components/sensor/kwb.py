@@ -15,7 +15,6 @@ from homeassistant.helpers.entity import Entity
 from homeassistant.components.sensor import PLATFORM_SCHEMA
 import homeassistant.helpers.config_validation as cv
 
-
 REQUIREMENTS = ['pykwb==0.0.8']
 
 _LOGGER = logging.getLogger(__name__)
@@ -49,8 +48,8 @@ PLATFORM_SCHEMA = vol.Schema(
 )
 
 
-def setup_platform(hass, config, add_devices, discovery_info=None):
-    """Setup the KWB component."""
+def setup_platform(hass, config, add_entities, discovery_info=None):
+    """Set up the KWB component."""
     host = config.get(CONF_HOST)
     port = config.get(CONF_PORT)
     device = config.get(CONF_DEVICE)
@@ -78,7 +77,7 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     hass.bus.listen_once(EVENT_HOMEASSISTANT_STOP,
                          lambda event: easyfire.stop_thread())
 
-    add_devices(sensors)
+    add_entities(sensors)
 
 
 class KWBSensor(Entity):
@@ -106,8 +105,7 @@ class KWBSensor(Entity):
         """Return the state of value."""
         if self._sensor.value is not None and self._sensor.available:
             return self._sensor.value
-        else:
-            return STATE_UNKNOWN
+        return STATE_UNKNOWN
 
     @property
     def unit_of_measurement(self):
